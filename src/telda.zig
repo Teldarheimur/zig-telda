@@ -3,7 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const builtin = @import("builtin");
 
-inline fn splitByte(byte: u8) struct {h: u4, l: u4} {
+inline fn splitByte(byte: u8) struct { h: u4, l: u4 } {
     return .{
         .h = @intCast(u4, byte >> 4),
         .l = @intCast(u4, byte & 0xf),
@@ -45,7 +45,7 @@ const RuntimeState = struct {
             0x41...0x54 => 3,
             else => 1,
         };
-        const ret = code[self.rip..self.rip+length];
+        const ret = code[self.rip .. self.rip + length];
         self.rip += length;
         return ret;
     }
@@ -53,8 +53,8 @@ const RuntimeState = struct {
         const index: u8 = regnum;
         return switch (regnum) {
             0 => 0,
-            1...10 => self.gprs[index-1],
-            11...15 => @truncate(u8, self.wr(regnum-11+6)),
+            1...10 => self.gprs[index - 1],
+            11...15 => @truncate(u8, self.wr(regnum - 11 + 6)),
         };
     }
     pub fn setbr(self: *Self, regnum: u4, val: u8) void {
@@ -62,7 +62,7 @@ const RuntimeState = struct {
         switch (regnum) {
             0 => {},
             1...10 => self.gprs[index - 1] = val,
-            11...15 => self.setwr(regnum-11+6, val),
+            11...15 => self.setwr(regnum - 11 + 6, val),
         }
     }
     pub fn wr(self: *Self, regnum: u4) u16 {
@@ -70,7 +70,7 @@ const RuntimeState = struct {
             0 => 0,
             1...10 => {
                 const i: u8 = @as(u8, regnum - 1) << 1;
-                return mem.readIntSliceLittle(u16, self.gprs[i..]);
+                return mem.readIntSliceLittle(u16, self.gprs[i .. i + 2]);
             },
             11 => self.rs,
             12 => self.rl,
@@ -83,8 +83,8 @@ const RuntimeState = struct {
         switch (regnum) {
             0 => {},
             1...10 => {
-                const i = @as(u8, regnum-1) << 1;
-                mem.writeIntSliceLittle(u16, self.gprs[i..], val);
+                const i = @as(u8, regnum - 1) << 1;
+                mem.writeIntSliceLittle(u16, self.gprs[i .. i + 2], val);
             },
             11 => self.rs = val,
             12 => self.rl = val,
@@ -93,73 +93,19 @@ const RuntimeState = struct {
             15 => self.rh = val,
         }
     }
+    pub inline fn setbrf(self: *Self, regnum: u4, val: u8) void {
+        self.setbr(regnum, val);
+        self.rflags.zero = val == 0;
+        self.rflags.sign = @bitCast(i8, val) < 0;
+    }
+    pub inline fn setwrf(self: *Self, regnum: u4, val: u16) void {
+        self.setwr(regnum, val);
+        self.rflags.zero = val == 0;
+        self.rflags.sign = @bitCast(i16, val) < 0;
+    }
 };
 
-test "register byte->wide" {
-    var rt = RuntimeState.init(0);
-    {var i: u4 = 1; while (i != 0) {
-        rt.setbr(i, i);
-        i +%= 1;
-    }}
-    try std.testing.expectEqual(@as(u16, 0x0201), rt.wr(0x1));
-    try std.testing.expectEqual(@as(u16, 0x0403), rt.wr(0x2));
-    try std.testing.expectEqual(@as(u16, 0x0605), rt.wr(0x3));
-    try std.testing.expectEqual(@as(u16, 0x0807), rt.wr(0x4));
-    try std.testing.expectEqual(@as(u16, 0x0a09), rt.wr(0x5));
-    try std.testing.expectEqual(@as(u16, 0x000b), rt.wr(0x6));
-    try std.testing.expectEqual(@as(u16, 0x000c), rt.wr(0x7));
-    try std.testing.expectEqual(@as(u16, 0x000d), rt.wr(0x8));
-    try std.testing.expectEqual(@as(u16, 0x000e), rt.wr(0x9));
-    try std.testing.expectEqual(@as(u16, 0x000f), rt.wr(0xa));
-}
-test "register wide" {
-    var rt = RuntimeState.init(0);
-    {var i: u4 = 1; while (i != 0) {
-        const v = @as(u16, i);
-        rt.setwr(i, ((v<<12)|(v<<8)|(v<<4)|(v<<0))-1);
-        i +%= 1;
-    }}
-    try std.testing.expectEqual(@as(u16, 0x1110), rt.wr(0x1));
-    try std.testing.expectEqual(@as(u16, 0x2221), rt.wr(0x2));
-    try std.testing.expectEqual(@as(u16, 0x3332), rt.wr(0x3));
-    try std.testing.expectEqual(@as(u16, 0x4443), rt.wr(0x4));
-    try std.testing.expectEqual(@as(u16, 0x5554), rt.wr(0x5));
-    try std.testing.expectEqual(@as(u16, 0x6665), rt.wr(0x6));
-    try std.testing.expectEqual(@as(u16, 0x7776), rt.wr(0x7));
-    try std.testing.expectEqual(@as(u16, 0x8887), rt.wr(0x8));
-    try std.testing.expectEqual(@as(u16, 0x9998), rt.wr(0x9));
-    try std.testing.expectEqual(@as(u16, 0xaaa9), rt.wr(0xa));
-    try std.testing.expectEqual(@as(u16, 0xbbba), rt.wr(0xb));
-    try std.testing.expectEqual(@as(u16, 0xcccb), rt.wr(0xc));
-    try std.testing.expectEqual(@as(u16, 0xdddc), rt.wr(0xd));
-    try std.testing.expectEqual(@as(u16, 0xeeed), rt.wr(0xe));
-    try std.testing.expectEqual(@as(u16, 0xfffe), rt.wr(0xf));
-}
-test "register wide->byte" {
-    var rt = RuntimeState.init(0);
-    {var i: u4 = 1; while (i <= 10) {
-        const v = @as(u16, i);
-        rt.setwr(i, ((v<<12)|(v<<8)|(v<<4)|(v<<0)) - 1);
-        i += 1;
-    }}
-    try std.testing.expectEqual(@as(u8, 0x10), rt.br(0x1));
-    try std.testing.expectEqual(@as(u8, 0x11), rt.br(0x2));
-    try std.testing.expectEqual(@as(u8, 0x21), rt.br(0x3));
-    try std.testing.expectEqual(@as(u8, 0x22), rt.br(0x4));
-    try std.testing.expectEqual(@as(u8, 0x32), rt.br(0x5));
-    try std.testing.expectEqual(@as(u8, 0x33), rt.br(0x6));
-    try std.testing.expectEqual(@as(u8, 0x43), rt.br(0x7));
-    try std.testing.expectEqual(@as(u8, 0x44), rt.br(0x8));
-    try std.testing.expectEqual(@as(u8, 0x54), rt.br(0x9));
-    try std.testing.expectEqual(@as(u8, 0x55), rt.br(0xa));
-    try std.testing.expectEqual(@as(u8, 0x65), rt.br(0xb));
-    try std.testing.expectEqual(@as(u8, 0x76), rt.br(0xc));
-    try std.testing.expectEqual(@as(u8, 0x87), rt.br(0xd));
-    try std.testing.expectEqual(@as(u8, 0x98), rt.br(0xe));
-    try std.testing.expectEqual(@as(u8, 0xa9), rt.br(0xf));
-}
-
-const Trap = error {
+const Trap = error{
     Invalid,
     Halt,
     ZeroDiv,
@@ -173,10 +119,6 @@ fn todo(comptime description: []const u8) noreturn {
 
 fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryView) Trap!void {
     const ins = rt.readInstruction(code);
-
-    if (builtin.mode == std.builtin.Mode.Debug) {
-        std.log.debug("instruction = {}", .{std.fmt.fmtSliceHexLower(ins)});
-    }
 
     switch (ins[0]) {
         0x0a => return Trap.Halt,
@@ -210,7 +152,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const regs = splitByte(ins[1]);
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
-            memvw.write(imm+rt.wr(regs.h), rt.br(regs.l)) catch return error.IoError;
+            memvw.write(imm + rt.wr(regs.h), rt.br(regs.l)) catch return error.IoError;
         },
         0x28 => todo("wide store with immediate, store wr1, w, wr2"),
         0x29 => {
@@ -224,7 +166,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const regs = splitByte(ins[1]);
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
-            rt.setbr(regs.h, memvw.read(imm+rt.wr(regs.l)) catch return error.IoError);
+            rt.setbr(regs.h, memvw.read(imm + rt.wr(regs.l)) catch return error.IoError);
         },
         0x2c => todo("load store with immediate, load wr1, wr2, w"),
         0x2d => {
@@ -297,42 +239,90 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) +% rt.br(op2));
+
+            var sum: u8 = undefined;
+            var isum: i8 = undefined;
+            const term1 = rt.br(op1);
+            const term2 = rt.br(op2);
+            const carry = @addWithOverflow(u8, term1, term2, &sum);
+            const overflow = @addWithOverflow(i8, @bitCast(i8, term1), @bitCast(i8, term2), &isum);
+            rt.rflags.carry = carry;
+            rt.rflags.overflow = overflow;
+            rt.rflags.zero = sum == 0;
+            rt.rflags.sign = isum < 0;
+
+            rt.setbr(dest, sum);
         },
         0x42 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) +% rt.wr(op2));
+
+            var sum: u16 = undefined;
+            var isum: i16 = undefined;
+            const term1 = rt.wr(op1);
+            const term2 = rt.wr(op2);
+            const carry = @addWithOverflow(u16, term1, term2, &sum);
+            const overflow = @addWithOverflow(i16, @bitCast(i16, term1), @bitCast(i16, term2), &isum);
+            rt.rflags.carry = carry;
+            rt.rflags.overflow = overflow;
+            rt.rflags.zero = sum == 0;
+            rt.rflags.sign = isum < 0;
+
+            rt.setwr(dest, sum);
         },
         0x43 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) -% rt.br(op2));
+
+            var sum: u8 = undefined;
+            var isum: i8 = undefined;
+            const term1 = rt.br(op1);
+            const term2 = rt.br(op2);
+            const carry = @subWithOverflow(u8, term1, term2, &sum);
+            const overflow = @subWithOverflow(i8, @bitCast(i8, term1), @bitCast(i8, term2), &isum);
+            rt.rflags.carry = carry;
+            rt.rflags.overflow = overflow;
+            rt.rflags.zero = sum == 0;
+            rt.rflags.sign = isum < 0;
+
+            rt.setbr(dest, sum);
         },
         0x44 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) -% rt.wr(op2));
+
+            var sum: u16 = undefined;
+            var isum: i16 = undefined;
+            const term1 = rt.wr(op1);
+            const term2 = rt.wr(op2);
+            const carry = @subWithOverflow(u16, term1, term2, &sum);
+            const overflow = @subWithOverflow(i16, @bitCast(i16, term1), @bitCast(i16, term2), &isum);
+            rt.rflags.carry = carry;
+            rt.rflags.overflow = overflow;
+            rt.rflags.zero = sum == 0;
+            rt.rflags.sign = isum < 0;
+
+            rt.setwr(dest, sum);
         },
         0x45 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) & rt.br(op2));
+            rt.setbrf(dest, rt.br(op1) & rt.br(op2));
         },
         0x46 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) & rt.wr(op2));
+            rt.setwrf(dest, rt.wr(op1) & rt.wr(op2));
         },
         0x47 => {
             const regs1 = splitByte(ins[1]);
@@ -346,69 +336,69 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) | rt.wr(op2));
+            rt.setwrf(dest, rt.wr(op1) | rt.wr(op2));
         },
         0x49 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) ^ rt.br(op2));
+            rt.setbrf(dest, rt.br(op1) ^ rt.br(op2));
         },
         0x4a => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) ^ rt.wr(op2));
+            rt.setwrf(dest, rt.wr(op1) ^ rt.wr(op2));
         },
         0x4b => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) << @intCast(u3, rt.br(op2)));
+            rt.setbrf(dest, rt.br(op1) << @intCast(u3, rt.br(op2)));
         },
         0x4c => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) << @intCast(u4, rt.wr(op2)));
+            rt.setwrf(dest, rt.wr(op1) << @intCast(u4, rt.wr(op2)));
         },
         0x4d => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, @intCast(u8, @intCast(i8, rt.br(op1)) >> @intCast(u3, rt.br(op2))));
+            rt.setbrf(dest, @intCast(u8, @bitCast(i8, rt.br(op1)) >> @intCast(u3, rt.br(op2))));
         },
         0x4e => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, @intCast(u16, @intCast(i16, rt.wr(op1)) >> @intCast(u4, rt.wr(op2))));
+            rt.setwrf(dest, @intCast(u16, @bitCast(i16, rt.wr(op1)) >> @intCast(u4, rt.wr(op2))));
         },
         0x4f => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbr(dest, rt.br(op1) >> @intCast(u3, rt.br(op2)));
+            rt.setbrf(dest, rt.br(op1) >> @intCast(u3, rt.br(op2)));
         },
         0x50 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwr(dest, rt.wr(op1) >> @intCast(u4, rt.wr(op2)));
+            rt.setwrf(dest, rt.wr(op1) >> @intCast(u4, rt.wr(op2)));
         },
         0x51 => {
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
             const dividend = rt.br(ops.h);
-            const divisor  = rt.br(ops.l);
+            const divisor = rt.br(ops.l);
 
             if (divisor == 0) return Trap.ZeroDiv;
 
@@ -419,7 +409,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
             const dividend = rt.wr(ops.h);
-            const divisor  = rt.wr(ops.l);
+            const divisor = rt.wr(ops.l);
 
             if (divisor == 0) return Trap.ZeroDiv;
 
@@ -452,26 +442,18 @@ pub const TeldaBin = struct {
     code: []u8,
     entry: ?u16,
     alloc: Allocator,
-    data: ?[]u8 = null,
+    data: []u8,
 
     const Self = @This();
 
     pub const MemoryView = struct {
         code_len: usize,
-        data: []u8,
+        data: *[]u8,
         alloc: Allocator,
         pub fn init(bin: *Self) !MemoryView {
-            var dat: []u8 = undefined;
-            if (bin.data) |dt| {
-                dat = dt;
-            } else {
-                dat = try bin.alloc.alloc(u8, 256);
-                bin.data = dat;
-            }
-
             return .{
                 .code_len = bin.code.len,
-                .data = dat,
+                .data = &bin.data,
                 .alloc = bin.alloc,
             };
         }
@@ -483,15 +465,17 @@ pub const TeldaBin = struct {
                 return buf[0];
             }
 
-            if (addr - self.code_len < self.data.len) {
-                return self.data[addr-self.code_len];
+            if (addr < self.code_len) {
+                return error.TriedToReadExecuteOnly;
+            } else if (addr - self.code_len < self.data.len) {
+                return self.data.*[addr - self.code_len];
             } else {
                 return 0;
             }
         }
         pub fn write(self: *@This(), addr: u16, b: u8) !void {
             if (addr >= 0xffe0) {
-                try std.io.getStdOut().writeAll(&[1]u8 {b});
+                try std.io.getStdOut().writeAll(&[1]u8{b});
 
                 return;
             }
@@ -499,10 +483,10 @@ pub const TeldaBin = struct {
             if (addr - self.code_len >= self.data.len) {
                 const old_len = self.data.len;
                 const new_size = @max(addr - self.code_len + 1, self.data.len << 1);
-                self.data = try self.alloc.realloc(self.data, new_size);
-                for (self.data[old_len..]) |*nb| nb.* = 0;
+                self.data.* = try self.alloc.realloc(self.data.*, new_size);
+                for (self.data.*[old_len..]) |*nb| nb.* = 0;
             }
-            self.data[addr-self.code_len] = b;
+            self.data.*[addr - self.code_len] = b;
         }
     };
 
@@ -521,14 +505,12 @@ pub const TeldaBin = struct {
 
     pub fn deinit(self: *Self) void {
         self.alloc.free(self.code);
+        self.alloc.free(self.data);
         self.code = self.code[0..0];
-        if (self.data) |dat| {
-            self.alloc.free(dat);
-        }
     }
 };
 
-pub const TeldaError = error {
+pub const TeldaError = error{
     NoEntry,
     UnhandledTrap,
     NoMagic,
@@ -570,17 +552,95 @@ pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
             const offset = try reader.readIntLittle(u16);
             const stype = try reader.readIntLittle(u8);
             _ = stype;
-            const length = size-3;
+            const length = size - 3;
             var seg_data = try alloc.alloc(u8, length);
             defer alloc.free(seg_data);
             _ = try reader.readAll(seg_data);
             const old_len = code.items.len;
-            if (old_len < offset+length) {
-                try code.resize(offset+length);
+            if (old_len < offset + length) {
+                try code.resize(offset + length);
                 for (code.items[old_len..]) |*b| b.* = 0;
             }
             try code.replaceRange(offset, length, seg_data);
         }
     }
-    return .{.alloc = alloc, .code = code.toOwnedSlice(), .entry = entry };
+    return .{
+        .alloc = alloc,
+        .code = code.toOwnedSlice(),
+        .data = try alloc.alloc(u8, 0),
+        .entry = entry,
+    };
+}
+
+test "register byte->wide" {
+    var rt = RuntimeState.init(0);
+    {
+        var i: u4 = 1;
+        while (i != 0) {
+            rt.setbr(i, i);
+            i +%= 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u16, 0x0201), rt.wr(0x1));
+    try std.testing.expectEqual(@as(u16, 0x0403), rt.wr(0x2));
+    try std.testing.expectEqual(@as(u16, 0x0605), rt.wr(0x3));
+    try std.testing.expectEqual(@as(u16, 0x0807), rt.wr(0x4));
+    try std.testing.expectEqual(@as(u16, 0x0a09), rt.wr(0x5));
+    try std.testing.expectEqual(@as(u16, 0x000b), rt.wr(0x6));
+    try std.testing.expectEqual(@as(u16, 0x000c), rt.wr(0x7));
+    try std.testing.expectEqual(@as(u16, 0x000d), rt.wr(0x8));
+    try std.testing.expectEqual(@as(u16, 0x000e), rt.wr(0x9));
+    try std.testing.expectEqual(@as(u16, 0x000f), rt.wr(0xa));
+}
+test "register wide" {
+    var rt = RuntimeState.init(0);
+    {
+        var i: u4 = 1;
+        while (i != 0) {
+            const v = @as(u16, i);
+            rt.setwr(i, ((v << 12) | (v << 8) | (v << 4) | (v << 0)) - 1);
+            i +%= 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u16, 0x1110), rt.wr(0x1));
+    try std.testing.expectEqual(@as(u16, 0x2221), rt.wr(0x2));
+    try std.testing.expectEqual(@as(u16, 0x3332), rt.wr(0x3));
+    try std.testing.expectEqual(@as(u16, 0x4443), rt.wr(0x4));
+    try std.testing.expectEqual(@as(u16, 0x5554), rt.wr(0x5));
+    try std.testing.expectEqual(@as(u16, 0x6665), rt.wr(0x6));
+    try std.testing.expectEqual(@as(u16, 0x7776), rt.wr(0x7));
+    try std.testing.expectEqual(@as(u16, 0x8887), rt.wr(0x8));
+    try std.testing.expectEqual(@as(u16, 0x9998), rt.wr(0x9));
+    try std.testing.expectEqual(@as(u16, 0xaaa9), rt.wr(0xa));
+    try std.testing.expectEqual(@as(u16, 0xbbba), rt.wr(0xb));
+    try std.testing.expectEqual(@as(u16, 0xcccb), rt.wr(0xc));
+    try std.testing.expectEqual(@as(u16, 0xdddc), rt.wr(0xd));
+    try std.testing.expectEqual(@as(u16, 0xeeed), rt.wr(0xe));
+    try std.testing.expectEqual(@as(u16, 0xfffe), rt.wr(0xf));
+}
+test "register wide->byte" {
+    var rt = RuntimeState.init(0);
+    {
+        var i: u4 = 1;
+        while (i <= 10) {
+            const v = @as(u16, i);
+            rt.setwr(i, ((v << 12) | (v << 8) | (v << 4) | (v << 0)) - 1);
+            i += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u8, 0x10), rt.br(0x1));
+    try std.testing.expectEqual(@as(u8, 0x11), rt.br(0x2));
+    try std.testing.expectEqual(@as(u8, 0x21), rt.br(0x3));
+    try std.testing.expectEqual(@as(u8, 0x22), rt.br(0x4));
+    try std.testing.expectEqual(@as(u8, 0x32), rt.br(0x5));
+    try std.testing.expectEqual(@as(u8, 0x33), rt.br(0x6));
+    try std.testing.expectEqual(@as(u8, 0x43), rt.br(0x7));
+    try std.testing.expectEqual(@as(u8, 0x44), rt.br(0x8));
+    try std.testing.expectEqual(@as(u8, 0x54), rt.br(0x9));
+    try std.testing.expectEqual(@as(u8, 0x55), rt.br(0xa));
+    try std.testing.expectEqual(@as(u8, 0x65), rt.br(0xb));
+    try std.testing.expectEqual(@as(u8, 0x76), rt.br(0xc));
+    try std.testing.expectEqual(@as(u8, 0x87), rt.br(0xd));
+    try std.testing.expectEqual(@as(u8, 0x98), rt.br(0xe));
+    try std.testing.expectEqual(@as(u8, 0xa9), rt.br(0xf));
 }

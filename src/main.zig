@@ -18,7 +18,12 @@ pub fn main() !void {
     var bin = try telda.readBinary(alloc, path);
     defer bin.deinit();
 
-    try bin.runCode();
+    bin.runCode() catch |e| switch (e) {
+        error.NoEntry => std.log.err("No entry", .{}),
+        error.NoMagic => std.log.err("No magic", .{}),
+        error.OutOfMemory => std.log.err("No alloc", .{}),
+        error.UnhandledTrap => std.log.err("Unhandled trap", .{}),
+    };
 }
 
 test {
