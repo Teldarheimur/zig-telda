@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const builtin = @import("builtin");
 
 inline fn splitByte(byte: u8) struct {h: u4, l: u4} {
     return .{
@@ -10,7 +11,7 @@ inline fn splitByte(byte: u8) struct {h: u4, l: u4} {
 }
 
 const RuntimeState = struct {
-    gprs: [10]u16 = undefined,
+    gprs: [20]u8 = undefined,
     rs: u16 = 0xffe0,
     rl: u16 = 0,
     rf: u16 = 0xffe0,
@@ -41,32 +42,122 @@ const RuntimeState = struct {
             0x2f...0x3a => 3,
             0x3f => 3,
             0x40 => 4,
-            0x41...0x54 => 4,
+            0x41...0x54 => 3,
             else => 1,
         };
         const ret = code[self.rip..self.rip+length];
         self.rip += length;
         return ret;
     }
-    pub fn br(self: *Self, regnum: u4, zero: *u8) *u8 {
+    pub fn br(self: *Self, regnum: u4) u8 {
+        const index: u8 = regnum;
         return switch (regnum) {
-            0 => zero,
-            1...10 => &@ptrCast([*]u8, &self.gprs)[regnum-1],
-            11...15 => &@ptrCast([*]u8, &self.gprs)[(regnum-11)<<1],
+            0 => 0,
+            1...10 => self.gprs[index-1],
+            11...15 => @truncate(u8, self.wr(regnum-11+6)),
         };
     }
-    pub fn wr(self: *Self, regnum: u4, zero: *u16) *u16 {
+    pub fn setbr(self: *Self, regnum: u4, val: u8) void {
+        const index: u8 = regnum;
+        switch (regnum) {
+            0 => {},
+            1...10 => self.gprs[index - 1] = val,
+            11...15 => self.setwr(regnum-11+6, val),
+        }
+    }
+    pub fn wr(self: *Self, regnum: u4) u16 {
         return switch (regnum) {
-            0 => zero,
-            1...10 => &self.gprs[regnum-1],
-            11 => &self.rs,
-            12 => &self.rl,
-            13 => &self.rf,
-            14 => &self.rp,
-            15 => &self.rh,
+            0 => 0,
+            1...10 => {
+                const i: u8 = @as(u8, regnum - 1) << 1;
+                return mem.readIntSliceLittle(u16, self.gprs[i..]);
+            },
+            11 => self.rs,
+            12 => self.rl,
+            13 => self.rf,
+            14 => self.rp,
+            15 => self.rh,
         };
+    }
+    pub fn setwr(self: *Self, regnum: u4, val: u16) void {
+        switch (regnum) {
+            0 => {},
+            1...10 => {
+                const i = @as(u8, regnum-1) << 1;
+                mem.writeIntSliceLittle(u16, self.gprs[i..], val);
+            },
+            11 => self.rs = val,
+            12 => self.rl = val,
+            13 => self.rf = val,
+            14 => self.rp = val,
+            15 => self.rh = val,
+        }
     }
 };
+
+test "register byte->wide" {
+    var rt = RuntimeState.init(0);
+    {var i: u4 = 1; while (i != 0) {
+        rt.setbr(i, i);
+        i +%= 1;
+    }}
+    try std.testing.expectEqual(@as(u16, 0x0201), rt.wr(0x1));
+    try std.testing.expectEqual(@as(u16, 0x0403), rt.wr(0x2));
+    try std.testing.expectEqual(@as(u16, 0x0605), rt.wr(0x3));
+    try std.testing.expectEqual(@as(u16, 0x0807), rt.wr(0x4));
+    try std.testing.expectEqual(@as(u16, 0x0a09), rt.wr(0x5));
+    try std.testing.expectEqual(@as(u16, 0x000b), rt.wr(0x6));
+    try std.testing.expectEqual(@as(u16, 0x000c), rt.wr(0x7));
+    try std.testing.expectEqual(@as(u16, 0x000d), rt.wr(0x8));
+    try std.testing.expectEqual(@as(u16, 0x000e), rt.wr(0x9));
+    try std.testing.expectEqual(@as(u16, 0x000f), rt.wr(0xa));
+}
+test "register wide" {
+    var rt = RuntimeState.init(0);
+    {var i: u4 = 1; while (i != 0) {
+        const v = @as(u16, i);
+        rt.setwr(i, ((v<<12)|(v<<8)|(v<<4)|(v<<0))-1);
+        i +%= 1;
+    }}
+    try std.testing.expectEqual(@as(u16, 0x1110), rt.wr(0x1));
+    try std.testing.expectEqual(@as(u16, 0x2221), rt.wr(0x2));
+    try std.testing.expectEqual(@as(u16, 0x3332), rt.wr(0x3));
+    try std.testing.expectEqual(@as(u16, 0x4443), rt.wr(0x4));
+    try std.testing.expectEqual(@as(u16, 0x5554), rt.wr(0x5));
+    try std.testing.expectEqual(@as(u16, 0x6665), rt.wr(0x6));
+    try std.testing.expectEqual(@as(u16, 0x7776), rt.wr(0x7));
+    try std.testing.expectEqual(@as(u16, 0x8887), rt.wr(0x8));
+    try std.testing.expectEqual(@as(u16, 0x9998), rt.wr(0x9));
+    try std.testing.expectEqual(@as(u16, 0xaaa9), rt.wr(0xa));
+    try std.testing.expectEqual(@as(u16, 0xbbba), rt.wr(0xb));
+    try std.testing.expectEqual(@as(u16, 0xcccb), rt.wr(0xc));
+    try std.testing.expectEqual(@as(u16, 0xdddc), rt.wr(0xd));
+    try std.testing.expectEqual(@as(u16, 0xeeed), rt.wr(0xe));
+    try std.testing.expectEqual(@as(u16, 0xfffe), rt.wr(0xf));
+}
+test "register wide->byte" {
+    var rt = RuntimeState.init(0);
+    {var i: u4 = 1; while (i <= 10) {
+        const v = @as(u16, i);
+        rt.setwr(i, ((v<<12)|(v<<8)|(v<<4)|(v<<0)) - 1);
+        i += 1;
+    }}
+    try std.testing.expectEqual(@as(u8, 0x10), rt.br(0x1));
+    try std.testing.expectEqual(@as(u8, 0x11), rt.br(0x2));
+    try std.testing.expectEqual(@as(u8, 0x21), rt.br(0x3));
+    try std.testing.expectEqual(@as(u8, 0x22), rt.br(0x4));
+    try std.testing.expectEqual(@as(u8, 0x32), rt.br(0x5));
+    try std.testing.expectEqual(@as(u8, 0x33), rt.br(0x6));
+    try std.testing.expectEqual(@as(u8, 0x43), rt.br(0x7));
+    try std.testing.expectEqual(@as(u8, 0x44), rt.br(0x8));
+    try std.testing.expectEqual(@as(u8, 0x54), rt.br(0x9));
+    try std.testing.expectEqual(@as(u8, 0x55), rt.br(0xa));
+    try std.testing.expectEqual(@as(u8, 0x65), rt.br(0xb));
+    try std.testing.expectEqual(@as(u8, 0x76), rt.br(0xc));
+    try std.testing.expectEqual(@as(u8, 0x87), rt.br(0xd));
+    try std.testing.expectEqual(@as(u8, 0x98), rt.br(0xe));
+    try std.testing.expectEqual(@as(u8, 0xa9), rt.br(0xf));
+}
 
 const Trap = error {
     Invalid,
@@ -76,14 +167,17 @@ const Trap = error {
     IoError,
 };
 
-fn widesUnsupported() noreturn {
-    @panic("wide reads and writes are not supported yet");
+fn todo(comptime description: []const u8) noreturn {
+    @panic("todo: " ++ description);
 }
 
-fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void {
-    var z: u8 = 0;
-    var c: u16 = 0;
+fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryView) Trap!void {
     const ins = rt.readInstruction(code);
+
+    if (builtin.mode == std.builtin.Mode.Debug) {
+        std.log.debug("instruction = {}", .{std.fmt.fmtSliceHexLower(ins)});
+    }
+
     switch (ins[0]) {
         0x0a => return Trap.Halt,
         // NOP
@@ -92,16 +186,16 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void
             const reg = splitByte(ins[1]).h;
             rt.rs -= 1;
 
-            memvw.write(rt.rs, rt.br(reg, &z).*) catch return error.IoError;
+            memvw.write(rt.rs, rt.br(reg)) catch return error.IoError;
         },
-        0x22 => widesUnsupported(),
+        0x22 => todo("push wide register"),
         0x23 => {
             const reg = splitByte(ins[1]).h;
-            rt.br(reg, &z).* = memvw.read(rt.rs) catch return error.IoError;
+            rt.setbr(reg, memvw.read(rt.rs) catch return error.IoError);
 
             rt.rs += 1;
         },
-        0x24 => widesUnsupported(),
+        0x24 => todo("pop wide register"),
         0x25 => {
             rt.rl = rt.rip;
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[1..3]));
@@ -116,30 +210,30 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void
             const regs = splitByte(ins[1]);
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
-            memvw.write(imm+rt.wr(regs.h, &c).*, rt.br(regs.l, &z).*) catch return error.IoError;
+            memvw.write(imm+rt.wr(regs.h), rt.br(regs.l)) catch return error.IoError;
         },
-        0x28 => widesUnsupported(),
+        0x28 => todo("wide store with immediate, store wr1, w, wr2"),
         0x29 => {
             const regs = splitByte(ins[1]);
             const src = splitByte(ins[2]).h;
 
-            memvw.write(rt.wr(regs.l, &c).*+rt.wr(regs.h, &c).*, rt.br(src, &z).*) catch return error.IoError;
+            memvw.write(rt.wr(regs.l) + rt.wr(regs.h), rt.br(src)) catch return error.IoError;
         },
-        0x2a => widesUnsupported(),
+        0x2a => todo("wide store with register, store wr1, wr2, wr3"),
         0x2b => {
             const regs = splitByte(ins[1]);
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
-            rt.br(regs.h, &z).* = memvw.read(imm+rt.wr(regs.l, &c).*) catch return error.IoError;
+            rt.setbr(regs.h, memvw.read(imm+rt.wr(regs.l)) catch return error.IoError);
         },
-        0x2c => widesUnsupported(),
+        0x2c => todo("load store with immediate, load wr1, wr2, w"),
         0x2d => {
             const regs = splitByte(ins[1]);
             const src = splitByte(ins[2]).h;
 
-            memvw.write(rt.wr(regs.h, &c).*+rt.wr(regs.l, &c).*, rt.br(src, &z).*) catch return error.IoError;
+            rt.setbr(regs.h, memvw.read(rt.wr(src) + rt.wr(regs.l)) catch return error.IoError);
         },
-        0x2e => widesUnsupported(),
+        0x2e => todo("load store with register, load wr1, wr2, wr3"),
         0x2f => if (rt.rflags.zero) {
             rt.rip = mem.littleToNative(u16, mem.bytesToValue(u16, ins[1..3]));
         },
@@ -178,7 +272,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void
         },
         0x3f => {
             const dest = splitByte(ins[1]).h;
-            rt.br(dest, &z).* = ins[2];
+            rt.setbr(dest, ins[2]);
         },
         0x40 => {
             const ins1 = splitByte(ins[1]);
@@ -187,12 +281,12 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
             switch (opt) {
-                0 => rt.wr(dest, &c).* = imm,
+                0 => rt.setwr(dest, imm),
                 1 => {
                     if (dest == 0) {
                         rt.rip = imm;
                     } else {
-                        rt.rip = rt.wr(dest, &c).*;
+                        rt.rip = rt.wr(dest);
                     }
                 },
                 else => return Trap.Invalid,
@@ -203,152 +297,152 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: anytype) Trap!void
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* +% rt.br(op2, &z).*;
+            rt.setbr(dest, rt.br(op1) +% rt.br(op2));
         },
         0x42 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* +% rt.wr(op2, &c).*;
+            rt.setwr(dest, rt.wr(op1) +% rt.wr(op2));
         },
         0x43 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* -% rt.br(op2, &z).*;
+            rt.setbr(dest, rt.br(op1) -% rt.br(op2));
         },
         0x44 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* -% rt.wr(op2, &c).*;
+            rt.setwr(dest, rt.wr(op1) -% rt.wr(op2));
         },
         0x45 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* & rt.br(op2, &z).*;
+            rt.setbr(dest, rt.br(op1) & rt.br(op2));
         },
         0x46 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* & rt.wr(op2, &c).*;
+            rt.setwr(dest, rt.wr(op1) & rt.wr(op2));
         },
         0x47 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* | rt.br(op2, &z).*;
+            rt.setbr(dest, rt.br(op1) | rt.br(op2));
         },
         0x48 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* | rt.wr(op2, &c).*;
+            rt.setwr(dest, rt.wr(op1) | rt.wr(op2));
         },
         0x49 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* ^ rt.br(op2, &z).*;
+            rt.setbr(dest, rt.br(op1) ^ rt.br(op2));
         },
         0x4a => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* ^ rt.wr(op2, &c).*;
+            rt.setwr(dest, rt.wr(op1) ^ rt.wr(op2));
         },
         0x4b => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* << @intCast(u3, rt.br(op2, &z).*);
+            rt.setbr(dest, rt.br(op1) << @intCast(u3, rt.br(op2)));
         },
         0x4c => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* << @intCast(u4, rt.wr(op2, &c).*);
+            rt.setwr(dest, rt.wr(op1) << @intCast(u4, rt.wr(op2)));
         },
         0x4d => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = @intCast(u8, @intCast(i8, rt.br(op1, &z).*) >> @intCast(u3, rt.br(op2, &z).*));
+            rt.setbr(dest, @intCast(u8, @intCast(i8, rt.br(op1)) >> @intCast(u3, rt.br(op2))));
         },
         0x4e => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = @intCast(u16, @intCast(i16, rt.wr(op1, &c).*) >> @intCast(u4, rt.wr(op2, &c).*));
+            rt.setwr(dest, @intCast(u16, @intCast(i16, rt.wr(op1)) >> @intCast(u4, rt.wr(op2))));
         },
         0x4f => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.br(dest, &z).* = rt.br(op1, &z).* >> @intCast(u3, rt.br(op2, &z).*);
+            rt.setbr(dest, rt.br(op1) >> @intCast(u3, rt.br(op2)));
         },
         0x50 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.wr(dest, &c).* = rt.wr(op1, &c).* >> @intCast(u4, rt.wr(op2, &c).*);
+            rt.setwr(dest, rt.wr(op1) >> @intCast(u4, rt.wr(op2)));
         },
         0x51 => {
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
-            const dividend = rt.br(ops.h, &z).*;
-            const divisor  = rt.br(ops.l, &z).*;
+            const dividend = rt.br(ops.h);
+            const divisor  = rt.br(ops.l);
 
             if (divisor == 0) return Trap.ZeroDiv;
 
-            rt.br(dest.h, &z).* = dividend / divisor;
-            rt.br(dest.l, &z).* = dividend % divisor;
+            rt.setbr(dest.h, dividend / divisor);
+            rt.setbr(dest.l, dividend % divisor);
         },
         0x52 => {
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
-            const dividend = rt.wr(ops.h, &c).*;
-            const divisor  = rt.wr(ops.l, &c).*;
+            const dividend = rt.wr(ops.h);
+            const divisor  = rt.wr(ops.l);
 
             if (divisor == 0) return Trap.ZeroDiv;
 
-            rt.wr(dest.h, &c).* = dividend / divisor;
-            rt.wr(dest.l, &c).* = dividend % divisor;
+            rt.setwr(dest.h, dividend / divisor);
+            rt.setwr(dest.l, dividend % divisor);
         },
         0x53 => {
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
-            const res = mem.nativeToLittle(u16, @intCast(u16, rt.br(ops.h, &z).*) * @intCast(u16, rt.br(ops.l, &z).*));
+            const res = mem.nativeToLittle(u16, @as(u16, rt.br(ops.h)) * @as(u16, rt.br(ops.l)));
             const bytes = mem.asBytes(&res);
 
-            rt.br(dest.l, &z).* = bytes[0];
-            rt.br(dest.h, &z).* = bytes[1];
+            rt.setbr(dest.l, bytes[0]);
+            rt.setbr(dest.h, bytes[1]);
         },
         0x54 => {
             const dest = splitByte(ins[1]);
             const ops = splitByte(ins[2]);
-            const res = mem.nativeToLittle(u32, @intCast(u32, rt.wr(ops.h, &c).*) * @intCast(u32, rt.wr(ops.l, &c).*));
+            const res = mem.nativeToLittle(u32, @as(u32, rt.wr(ops.h)) * @as(u32, rt.wr(ops.l)));
             const bytes = mem.asBytes(&res);
 
-            rt.wr(dest.l, &c).* = mem.bytesToValue(u16, bytes[0..2]);
-            rt.wr(dest.h, &c).* = mem.bytesToValue(u16, bytes[2..4]);
+            rt.setwr(dest.l, mem.bytesToValue(u16, bytes[0..2]));
+            rt.setwr(dest.h, mem.bytesToValue(u16, bytes[2..4]));
         },
         else => return Trap.Invalid,
     }

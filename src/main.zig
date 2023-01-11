@@ -20,3 +20,7 @@ pub fn main() !void {
 
     try bin.runCode();
 }
+
+test {
+    @import("std").testing.refAllDecls(@This());
+}
