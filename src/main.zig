@@ -19,6 +19,7 @@ pub fn main() !void {
         error.NoMagic => std.log.err("No magic", .{}),
         error.OutOfMemory => std.log.err("No alloc", .{}),
         error.UnhandledTrap => std.log.err("Unhandled trap", .{}),
+        error.CouldNotPrint => std.log.err("Could not print", .{}),
     };
 }
 

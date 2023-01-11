@@ -485,17 +485,26 @@ pub const TeldaBin = struct {
 
     const Self = @This();
 
+
+    const MemvwStdout = std.io.BufferedWriter(4096, std.fs.File.Writer).Writer;
+    const MemvwStdin = std.io.BufferedReader(4096, std.fs.File.Reader).Reader;
+
     pub const MemoryView = struct {
         data: *[MEM_SIZE]u8,
-        pub fn init(bin: *Self) !MemoryView {
+        stdout: MemvwStdout,
+        stdin: MemvwStdin,
+
+        pub fn init(bin: *Self, stdout: MemvwStdout, stdin: MemvwStdin) @This() {
             return .{
                 .data = bin.memory,
+                .stdout = stdout,
+                .stdin = stdin,
             };
         }
         pub fn read(self: *@This(), addr: u16) !u8 {
             if (addr >= 0xffe0) {
                 var buf: [1]u8 = undefined;
-                _ = try std.io.getStdIn().readAll(&buf);
+                _ = try self.stdin.readAll(&buf);
 
                 return buf[0];
             }
@@ -504,7 +513,7 @@ pub const TeldaBin = struct {
         }
         pub fn write(self: *@This(), addr: u16, b: u8) !void {
             if (addr >= 0xffe0) {
-                try std.io.getStdOut().writeAll(&[1]u8{b});
+                try self.stdout.writeAll(&[1]u8{b});
 
                 return;
             }
@@ -528,14 +537,17 @@ pub const TeldaBin = struct {
     pub fn runCode(self: *Self) TeldaError!void {
         var rt = RuntimeState.init(self.entry orelse return error.NoEntry);
         var running = true;
+        var stdout = std.io.bufferedWriter(std.io.getStdOut().writer());
+        var stdin = std.io.bufferedReader(std.io.getStdIn().reader());
         while (running) {
-            var memvw = try MemoryView.init(self);
+            var memvw = MemoryView.init(self, stdout.writer(), stdin.reader());
             runInstruction(self.memory, &rt, &memvw) catch |e| {
                 if (e == Trap.Halt) {
                     running = false;
                 } else return error.UnhandledTrap;
             };
         }
+        stdout.flush() catch return TeldaError.CouldNotPrint;
     }
 
     pub fn deinit(self: *Self) void {
@@ -548,6 +560,7 @@ pub const TeldaError = error{
     UnhandledTrap,
     NoMagic,
     OutOfMemory,
+    CouldNotPrint,
 };
 
 const aalvur_magic: *const [8]u8 = "álvur2\n";
