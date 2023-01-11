@@ -10,6 +10,15 @@ inline fn splitByte(byte: u8) struct { h: u4, l: u4 } {
     };
 }
 
+inline fn getWide(slice: []u8, index: usize) u16 {
+    std.debug.assert(slice.len > 2);
+    return mem.readIntSliceLittle(u16, slice[index..index+2]);
+}
+inline fn setWide(slice: []u8, index: usize, wide: u16) void {
+    std.debug.assert(slice.len > 2);
+    mem.writeIntSliceLittle(u16, slice[index..index+2], wide);
+}
+
 const RuntimeState = struct {
     gprs: [20]u8 = undefined,
     rs: u16 = 0xffe0,
@@ -34,15 +43,17 @@ const RuntimeState = struct {
     }
     pub fn readInstruction(self: *Self, code: []const u8) []const u8 {
         const length: u16 = switch (code[self.rip]) {
-            0x21...0x26 => 2,
-            0x27...0x28 => 4,
-            0x29...0x2a => 3,
-            0x2b...0x2c => 4,
-            0x2d...0x2e => 3,
-            0x2f...0x3a => 3,
-            0x3f => 3,
-            0x40 => 4,
+            0x21...0x24,
+            0x26 => 2,
+            0x25,
+            0x2d...0x2e,
+            0x29...0x2a,
+            0x2f...0x3a,
+            0x3f,
             0x41...0x54 => 3,
+            0x27...0x28,
+            0x2b...0x2c,
+            0x40 => 4,
             else => 1,
         };
         const ret = code[self.rip .. self.rip + length];
@@ -70,7 +81,7 @@ const RuntimeState = struct {
             0 => 0,
             1...10 => {
                 const i: u8 = @as(u8, regnum - 1) << 1;
-                return mem.readIntSliceLittle(u16, self.gprs[i .. i + 2]);
+                return getWide(&self.gprs, i);
             },
             11 => self.rs,
             12 => self.rl,
@@ -84,7 +95,7 @@ const RuntimeState = struct {
             0 => {},
             1...10 => {
                 const i = @as(u8, regnum - 1) << 1;
-                mem.writeIntSliceLittle(u16, self.gprs[i .. i + 2], val);
+                setWide(&self.gprs, i, val);
             },
             11 => self.rs = val,
             12 => self.rl = val,
@@ -113,10 +124,6 @@ const Trap = error{
     IoError,
 };
 
-fn todo(comptime description: []const u8) noreturn {
-    @panic("todo: " ++ description);
-}
-
 fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryView) Trap!void {
     const ins = rt.readInstruction(code);
 
@@ -130,14 +137,25 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
 
             memvw.write(rt.rs, rt.br(reg)) catch return error.IoError;
         },
-        0x22 => todo("push wide register"),
+        0x22 => {
+            const reg = splitByte(ins[1]).h;
+            rt.rs -= 2;
+
+            memvw.writew(rt.rs, rt.wr(reg)) catch return error.IoError;
+        },
         0x23 => {
             const reg = splitByte(ins[1]).h;
             rt.setbr(reg, memvw.read(rt.rs) catch return error.IoError);
 
             rt.rs += 1;
         },
-        0x24 => todo("pop wide register"),
+        0x24 => {
+            const reg = splitByte(ins[1]).h;
+
+            const val = memvw.readw(rt.rs) catch return error.IoError;
+            rt.setwr(reg, val);
+            rt.rs += 2;
+        },
         0x25 => {
             rt.rl = rt.rip;
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[1..3]));
@@ -154,28 +172,48 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
 
             memvw.write(imm + rt.wr(regs.h), rt.br(regs.l)) catch return error.IoError;
         },
-        0x28 => todo("wide store with immediate, store wr1, w, wr2"),
+        0x28 => {
+            const regs = splitByte(ins[1]);
+            const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
+
+            memvw.writew(imm + rt.wr(regs.h), rt.wr(regs.l)) catch return error.IoError;
+        },
         0x29 => {
             const regs = splitByte(ins[1]);
             const src = splitByte(ins[2]).h;
 
             memvw.write(rt.wr(regs.l) + rt.wr(regs.h), rt.br(src)) catch return error.IoError;
         },
-        0x2a => todo("wide store with register, store wr1, wr2, wr3"),
+        0x2a => {
+            const regs = splitByte(ins[1]);
+            const src = splitByte(ins[2]).h;
+
+            memvw.writew(rt.wr(regs.l) + rt.wr(regs.h), rt.wr(src)) catch return error.IoError;
+        },
         0x2b => {
             const regs = splitByte(ins[1]);
             const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
 
             rt.setbr(regs.h, memvw.read(imm + rt.wr(regs.l)) catch return error.IoError);
         },
-        0x2c => todo("load store with immediate, load wr1, wr2, w"),
+        0x2c => {
+            const regs = splitByte(ins[1]);
+            const imm = mem.littleToNative(u16, mem.bytesToValue(u16, ins[2..4]));
+
+            rt.setwr(regs.h, memvw.readw(imm + rt.wr(regs.l)) catch return error.IoError);
+        },
         0x2d => {
             const regs = splitByte(ins[1]);
             const src = splitByte(ins[2]).h;
 
             rt.setbr(regs.h, memvw.read(rt.wr(src) + rt.wr(regs.l)) catch return error.IoError);
         },
-        0x2e => todo("load store with register, load wr1, wr2, wr3"),
+        0x2e => {
+            const regs = splitByte(ins[1]);
+            const src = splitByte(ins[2]).h;
+
+            rt.setwr(regs.h, memvw.readw(rt.wr(src) + rt.wr(regs.l)) catch return error.IoError);
+        },
         0x2f => if (rt.rflags.zero) {
             rt.rip = mem.littleToNative(u16, mem.bytesToValue(u16, ins[1..3]));
         },
@@ -438,23 +476,20 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
     }
 }
 
+pub const MEM_SIZE = 256*256-0x20;
+
 pub const TeldaBin = struct {
-    code: []u8,
+    memory: *[MEM_SIZE]u8,
     entry: ?u16,
     alloc: Allocator,
-    data: []u8,
 
     const Self = @This();
 
     pub const MemoryView = struct {
-        code_len: usize,
-        data: *[]u8,
-        alloc: Allocator,
+        data: *[MEM_SIZE]u8,
         pub fn init(bin: *Self) !MemoryView {
             return .{
-                .code_len = bin.code.len,
-                .data = &bin.data,
-                .alloc = bin.alloc,
+                .data = bin.memory,
             };
         }
         pub fn read(self: *@This(), addr: u16) !u8 {
@@ -465,13 +500,7 @@ pub const TeldaBin = struct {
                 return buf[0];
             }
 
-            if (addr < self.code_len) {
-                return error.TriedToReadExecuteOnly;
-            } else if (addr - self.code_len < self.data.len) {
-                return self.data.*[addr - self.code_len];
-            } else {
-                return 0;
-            }
+            return self.data.*[addr];
         }
         pub fn write(self: *@This(), addr: u16, b: u8) !void {
             if (addr >= 0xffe0) {
@@ -480,13 +509,19 @@ pub const TeldaBin = struct {
                 return;
             }
 
-            if (addr - self.code_len >= self.data.len) {
-                const old_len = self.data.len;
-                const new_size = @max(addr - self.code_len + 1, self.data.len << 1);
-                self.data.* = try self.alloc.realloc(self.data.*, new_size);
-                for (self.data.*[old_len..]) |*nb| nb.* = 0;
-            }
-            self.data.*[addr - self.code_len] = b;
+            self.data.*[addr] = b;
+        }
+        pub fn readw(self: *@This(), addr: u16) !u16 {
+            const bytes = [_]u8 {
+                try self.read(addr),
+                try self.read(addr+1)
+            };
+            return mem.readIntLittle(u16, &bytes);
+        }
+        pub fn writew(self: *@This(), addr: u16, val: u16) !void {
+            const bytes = mem.asBytes(&mem.nativeToLittle(u16, val));
+            try self.write(addr, bytes[0]);
+            try self.write(addr+1, bytes[1]);
         }
     };
 
@@ -495,7 +530,7 @@ pub const TeldaBin = struct {
         var running = true;
         while (running) {
             var memvw = try MemoryView.init(self);
-            runInstruction(self.code, &rt, &memvw) catch |e| {
+            runInstruction(self.memory, &rt, &memvw) catch |e| {
                 if (e == Trap.Halt) {
                     running = false;
                 } else return error.UnhandledTrap;
@@ -504,9 +539,7 @@ pub const TeldaBin = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.alloc.free(self.code);
-        self.alloc.free(self.data);
-        self.code = self.code[0..0];
+        self.alloc.destroy(self.memory);
     }
 };
 
@@ -533,8 +566,9 @@ pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
     if (!mem.eql(u8, &aalvur_magic.*, &magic_buf)) return TeldaError.NoMagic;
 
     var entry: ?u16 = null;
-    var code = std.ArrayList(u8).init(alloc);
-    defer code.deinit();
+    var code = try alloc.create([MEM_SIZE]u8);
+    mem.set(u8, code, 0);
+    // var code = [1]u8{0} ** (256*256-0x20); // is this safe?
 
     while (true) {
         const section_name = try reader.readUntilDelimiterAlloc(alloc, 0, 0xffff);
@@ -553,22 +587,13 @@ pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
             const stype = try reader.readIntLittle(u8);
             _ = stype;
             const length = size - 3;
-            var seg_data = try alloc.alloc(u8, length);
-            defer alloc.free(seg_data);
-            _ = try reader.readAll(seg_data);
-            const old_len = code.items.len;
-            if (old_len < offset + length) {
-                try code.resize(offset + length);
-                for (code.items[old_len..]) |*b| b.* = 0;
-            }
-            try code.replaceRange(offset, length, seg_data);
+            _ = try reader.readAll(code[offset..offset+length]);
         }
     }
     return .{
-        .alloc = alloc,
-        .code = code.toOwnedSlice(),
-        .data = try alloc.alloc(u8, 0),
+        .memory = code,
         .entry = entry,
+        .alloc = alloc,
     };
 }
 

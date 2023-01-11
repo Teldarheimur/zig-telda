@@ -7,10 +7,6 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    // defer arena.deinit();
-    // const alloc = arena.allocator();
-
     var args = process.args();
     _ = args.skip();
     const path = args.next() orelse return error.NoArg;
