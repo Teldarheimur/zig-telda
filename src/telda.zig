@@ -2,21 +2,29 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const builtin = @import("builtin");
+const littleEndian = std.builtin.Endian.little;
+
+inline fn sign8(unsigned: u8) i8 {
+    return @bitCast(unsigned);
+}
+inline fn sign16(unsigned: u16) i16 {
+    return @bitCast(unsigned);
+}
 
 inline fn splitByte(byte: u8) struct { h: u4, l: u4 } {
     return .{
-        .h = @intCast(u4, byte >> 4),
-        .l = @intCast(u4, byte & 0xf),
+        .h = @intCast(byte >> 4),
+        .l = @intCast(byte & 0xf),
     };
 }
 
 inline fn getWide(slice: []u8, index: usize) u16 {
     std.debug.assert(slice.len > 2);
-    return mem.readIntSliceLittle(u16, slice[index..index+2]);
+    return mem.readInt(u16, slice[index..][0..2], littleEndian);
 }
 inline fn setWide(slice: []u8, index: usize, wide: u16) void {
     std.debug.assert(slice.len > 2);
-    mem.writeIntSliceLittle(u16, slice[index..index+2], wide);
+    mem.writeInt(u16, slice[index..][0..2], wide, littleEndian);
 }
 
 const RuntimeState = struct {
@@ -65,7 +73,7 @@ const RuntimeState = struct {
         return switch (regnum) {
             0 => 0,
             1...10 => self.gprs[index - 1],
-            11...15 => @truncate(u8, self.wr(regnum - 11 + 6)),
+            11...15 => @truncate(self.wr(regnum - 11 + 6)),
         };
     }
     pub fn setbr(self: *Self, regnum: u4, val: u8) void {
@@ -107,12 +115,12 @@ const RuntimeState = struct {
     pub inline fn setbrf(self: *Self, regnum: u4, val: u8) void {
         self.setbr(regnum, val);
         self.rflags.zero = val == 0;
-        self.rflags.sign = @bitCast(i8, val) < 0;
+        self.rflags.sign = @as(i8, @bitCast(val)) < 0;
     }
     pub inline fn setwrf(self: *Self, regnum: u4, val: u16) void {
         self.setwr(regnum, val);
         self.rflags.zero = val == 0;
-        self.rflags.sign = @bitCast(i16, val) < 0;
+        self.rflags.sign = @as(i16, @bitCast(val)) < 0;
     }
 };
 
@@ -278,14 +286,13 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
 
-            var sum: u8 = undefined;
-            var isum: i8 = undefined;
             const term1 = rt.br(op1);
             const term2 = rt.br(op2);
-            const carry = @addWithOverflow(u8, term1, term2, &sum);
-            const overflow = @addWithOverflow(i8, @bitCast(i8, term1), @bitCast(i8, term2), &isum);
-            rt.rflags.carry = carry;
-            rt.rflags.overflow = overflow;
+            const sum, const carry = @addWithOverflow(term1, term2);
+            const isum, const overflow = @addWithOverflow(sign8(term1), sign8(term2));
+
+            rt.rflags.carry = @bitCast(carry);
+            rt.rflags.overflow = @bitCast(overflow);
             rt.rflags.zero = sum == 0;
             rt.rflags.sign = isum < 0;
 
@@ -297,14 +304,13 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
 
-            var sum: u16 = undefined;
-            var isum: i16 = undefined;
             const term1 = rt.wr(op1);
             const term2 = rt.wr(op2);
-            const carry = @addWithOverflow(u16, term1, term2, &sum);
-            const overflow = @addWithOverflow(i16, @bitCast(i16, term1), @bitCast(i16, term2), &isum);
-            rt.rflags.carry = carry;
-            rt.rflags.overflow = overflow;
+            const sum, const carry = @addWithOverflow(term1, term2);
+            const isum, const overflow = @addWithOverflow(sign16(term1), sign16(term2));
+
+            rt.rflags.carry = @bitCast(carry);
+            rt.rflags.overflow = @bitCast(overflow);
             rt.rflags.zero = sum == 0;
             rt.rflags.sign = isum < 0;
 
@@ -316,14 +322,13 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
 
-            var sum: u8 = undefined;
-            var isum: i8 = undefined;
             const term1 = rt.br(op1);
             const term2 = rt.br(op2);
-            const carry = @subWithOverflow(u8, term1, term2, &sum);
-            const overflow = @subWithOverflow(i8, @bitCast(i8, term1), @bitCast(i8, term2), &isum);
-            rt.rflags.carry = carry;
-            rt.rflags.overflow = overflow;
+            const sum, const carry = @subWithOverflow(term1, term2);
+            const isum, const overflow = @subWithOverflow(sign8(term1), sign8(term2));
+
+            rt.rflags.carry = @bitCast(carry);
+            rt.rflags.overflow = @bitCast(overflow);
             rt.rflags.zero = sum == 0;
             rt.rflags.sign = isum < 0;
 
@@ -335,14 +340,13 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
 
-            var sum: u16 = undefined;
-            var isum: i16 = undefined;
             const term1 = rt.wr(op1);
             const term2 = rt.wr(op2);
-            const carry = @subWithOverflow(u16, term1, term2, &sum);
-            const overflow = @subWithOverflow(i16, @bitCast(i16, term1), @bitCast(i16, term2), &isum);
-            rt.rflags.carry = carry;
-            rt.rflags.overflow = overflow;
+            const sum, const carry = @subWithOverflow(term1, term2);
+            const isum, const overflow = @subWithOverflow(sign16(term1), sign16(term2));
+
+            rt.rflags.carry = @bitCast(carry);
+            rt.rflags.overflow = @bitCast(overflow);
             rt.rflags.zero = sum == 0;
             rt.rflags.sign = isum < 0;
 
@@ -395,42 +399,42 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbrf(dest, rt.br(op1) << @intCast(u3, rt.br(op2)));
+            rt.setbrf(dest, rt.br(op1) << @intCast(rt.br(op2)));
         },
         0x4c => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwrf(dest, rt.wr(op1) << @intCast(u4, rt.wr(op2)));
+            rt.setwrf(dest, rt.wr(op1) << @intCast(rt.wr(op2)));
         },
         0x4d => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbrf(dest, @intCast(u8, @bitCast(i8, rt.br(op1)) >> @intCast(u3, rt.br(op2))));
+            rt.setbrf(dest, @intCast(sign8(rt.br(op1)) >> @intCast(rt.br(op2))));
         },
         0x4e => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwrf(dest, @intCast(u16, @bitCast(i16, rt.wr(op1)) >> @intCast(u4, rt.wr(op2))));
+            rt.setwrf(dest, @intCast(sign16(rt.wr(op1)) >> @intCast(rt.wr(op2))));
         },
         0x4f => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbrf(dest, rt.br(op1) >> @intCast(u3, rt.br(op2)));
+            rt.setbrf(dest, rt.br(op1) >> @intCast(rt.br(op2)));
         },
         0x50 => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwrf(dest, rt.wr(op1) >> @intCast(u4, rt.wr(op2)));
+            rt.setwrf(dest, rt.wr(op1) >> @intCast(rt.wr(op2)));
         },
         0x51 => {
             const dest = splitByte(ins[1]);
@@ -525,7 +529,7 @@ pub const TeldaBin = struct {
                 try self.read(addr),
                 try self.read(addr+1)
             };
-            return mem.readIntLittle(u16, &bytes);
+            return mem.readInt(u16, &bytes, littleEndian);
         }
         pub fn writew(self: *@This(), addr: u16, val: u16) !void {
             const bytes = mem.asBytes(&mem.nativeToLittle(u16, val));
@@ -565,10 +569,32 @@ pub const TeldaError = error{
 
 const aalvur_magic: *const [8]u8 = "álvur2\n";
 
+// skips shebang up to 1KiB long
+fn skipSheBang(file: *std.fs.File) !void {
+    var buffer: [1024]u8 = undefined;
+    const n = try file.readAll(&buffer);
+    const bytes = buffer[0..n];
+    if (mem.eql(u8, bytes[0..2], "#!")) {
+        for (bytes[2..], 2..) |b, i| {
+            if (b == '\n') {
+                try file.seekTo(i);
+                return;
+            }
+        }
+        // TODO: support longer shebang headers?
+        return error.SheBangTooLong;
+    } else {
+        try file.seekTo(0);
+    }
+}
+
 // Remember to deinit the `TeldaBin` to free it
 pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
+
+    try skipSheBang(&file);
+
     var buf = std.io.bufferedReader(file.reader());
     var reader = buf.reader();
 
@@ -576,28 +602,30 @@ pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
 
     _ = try reader.readAll(&magic_buf);
 
-    if (!mem.eql(u8, &aalvur_magic.*, &magic_buf)) return TeldaError.NoMagic;
+    if (!mem.eql(u8, &aalvur_magic.*, &magic_buf)) {
+        try reader.skipUntilDelimiterOrEof('\n');
+    }
 
     var entry: ?u16 = null;
     var code = try alloc.create([MEM_SIZE]u8);
-    mem.set(u8, code, 0);
+    @memset(code, 0);
     // var code = [1]u8{0} ** (256*256-0x20); // is this safe?
 
     while (true) {
         const section_name = try reader.readUntilDelimiterAlloc(alloc, 0, 0xffff);
         defer alloc.free(section_name);
         if (section_name.len == 0) break;
-        const size = try reader.readIntLittle(u16);
+        const size = try reader.readInt(u16, littleEndian);
 
         if (mem.eql(u8, section_name, "_entry")) {
             std.debug.assert(size == 3);
             // segment type
-            _ = try reader.readIntLittle(u8);
-            const addr = try reader.readIntLittle(u16);
+            _ = try reader.readInt(u8, littleEndian);
+            const addr = try reader.readInt(u16, littleEndian);
             entry = addr;
         } else if (mem.eql(u8, section_name, "_seg")) {
-            const offset = try reader.readIntLittle(u16);
-            const stype = try reader.readIntLittle(u8);
+            const offset = try reader.readInt(u16, littleEndian);
+            const stype = try reader.readInt(u8, littleEndian);
             _ = stype;
             const length = size - 3;
             _ = try reader.readAll(code[offset..offset+length]);
