@@ -4,10 +4,14 @@ const Allocator = mem.Allocator;
 const builtin = @import("builtin");
 const littleEndian = std.builtin.Endian.little;
 
-inline fn sign8(unsigned: u8) i8 {
-    return @bitCast(unsigned);
+const Int = std.meta.Int;
+
+fn signed(comptime int: type) type {
+    return Int(.signed, @typeInfo(int).Int.bits);
 }
-inline fn sign16(unsigned: u16) i16 {
+
+// return signed version of type
+inline fn sign(unsigned: anytype) signed(@TypeOf(unsigned)) {
     return @bitCast(unsigned);
 }
 
@@ -289,7 +293,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const term1 = rt.br(op1);
             const term2 = rt.br(op2);
             const sum, const carry = @addWithOverflow(term1, term2);
-            const isum, const overflow = @addWithOverflow(sign8(term1), sign8(term2));
+            const isum, const overflow = @addWithOverflow(sign(term1), sign(term2));
 
             rt.rflags.carry = @bitCast(carry);
             rt.rflags.overflow = @bitCast(overflow);
@@ -307,7 +311,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const term1 = rt.wr(op1);
             const term2 = rt.wr(op2);
             const sum, const carry = @addWithOverflow(term1, term2);
-            const isum, const overflow = @addWithOverflow(sign16(term1), sign16(term2));
+            const isum, const overflow = @addWithOverflow(sign(term1), sign(term2));
 
             rt.rflags.carry = @bitCast(carry);
             rt.rflags.overflow = @bitCast(overflow);
@@ -325,7 +329,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const term1 = rt.br(op1);
             const term2 = rt.br(op2);
             const sum, const carry = @subWithOverflow(term1, term2);
-            const isum, const overflow = @subWithOverflow(sign8(term1), sign8(term2));
+            const isum, const overflow = @subWithOverflow(sign(term1), sign(term2));
 
             rt.rflags.carry = @bitCast(carry);
             rt.rflags.overflow = @bitCast(overflow);
@@ -343,7 +347,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const term1 = rt.wr(op1);
             const term2 = rt.wr(op2);
             const sum, const carry = @subWithOverflow(term1, term2);
-            const isum, const overflow = @subWithOverflow(sign16(term1), sign16(term2));
+            const isum, const overflow = @subWithOverflow(sign(term1), sign(term2));
 
             rt.rflags.carry = @bitCast(carry);
             rt.rflags.overflow = @bitCast(overflow);
@@ -413,14 +417,14 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setbrf(dest, @intCast(sign8(rt.br(op1)) >> @intCast(rt.br(op2))));
+            rt.setbrf(dest, @intCast(sign(rt.br(op1)) >> @intCast(rt.br(op2))));
         },
         0x4e => {
             const regs1 = splitByte(ins[1]);
             const dest = regs1.h;
             const op1 = regs1.l;
             const op2 = splitByte(ins[2]).h;
-            rt.setwrf(dest, @intCast(sign16(rt.wr(op1)) >> @intCast(rt.wr(op2))));
+            rt.setwrf(dest, @intCast(sign(rt.wr(op1)) >> @intCast(rt.wr(op2))));
         },
         0x4f => {
             const regs1 = splitByte(ins[1]);
