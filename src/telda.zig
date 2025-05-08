@@ -7,7 +7,7 @@ const littleEndian = std.builtin.Endian.little;
 const Int = std.meta.Int;
 
 fn signed(comptime int: type) type {
-    return Int(.signed, @typeInfo(int).Int.bits);
+    return Int(.signed, @typeInfo(int).int.bits);
 }
 
 // return signed version of type
@@ -55,17 +55,9 @@ const RuntimeState = struct {
     }
     pub fn readInstruction(self: *Self, code: []const u8) []const u8 {
         const length: u16 = switch (code[self.rip]) {
-            0x21...0x24,
-            0x26 => 2,
-            0x25,
-            0x2d...0x2e,
-            0x29...0x2a,
-            0x2f...0x3a,
-            0x3f,
-            0x41...0x54 => 3,
-            0x27...0x28,
-            0x2b...0x2c,
-            0x40 => 4,
+            0x21...0x24, 0x26 => 2,
+            0x25, 0x2d...0x2e, 0x29...0x2a, 0x2f...0x3a, 0x3f, 0x41...0x54 => 3,
+            0x27...0x28, 0x2b...0x2c, 0x40 => 4,
             else => 1,
         };
         const ret = code[self.rip .. self.rip + length];
@@ -484,7 +476,7 @@ fn runInstruction(code: []const u8, rt: *RuntimeState, memvw: *TeldaBin.MemoryVi
     }
 }
 
-pub const MEM_SIZE = 256*256-0x20;
+pub const MEM_SIZE = 256 * 256 - 0x20;
 
 pub const TeldaBin = struct {
     memory: *[MEM_SIZE]u8,
@@ -492,7 +484,6 @@ pub const TeldaBin = struct {
     alloc: Allocator,
 
     const Self = @This();
-
 
     const MemvwStdout = std.io.BufferedWriter(4096, std.fs.File.Writer).Writer;
     const MemvwStdin = std.io.BufferedReader(4096, std.fs.File.Reader).Reader;
@@ -529,16 +520,13 @@ pub const TeldaBin = struct {
             self.data.*[addr] = b;
         }
         pub fn readw(self: *@This(), addr: u16) !u16 {
-            const bytes = [_]u8 {
-                try self.read(addr),
-                try self.read(addr+1)
-            };
+            const bytes = [_]u8{ try self.read(addr), try self.read(addr + 1) };
             return mem.readInt(u16, &bytes, littleEndian);
         }
         pub fn writew(self: *@This(), addr: u16, val: u16) !void {
             const bytes = mem.asBytes(&mem.nativeToLittle(u16, val));
             try self.write(addr, bytes[0]);
-            try self.write(addr+1, bytes[1]);
+            try self.write(addr + 1, bytes[1]);
         }
     };
 
@@ -632,7 +620,7 @@ pub fn readBinary(alloc: Allocator, path: []const u8) !TeldaBin {
             const stype = try reader.readInt(u8, littleEndian);
             _ = stype;
             const length = size - 3;
-            _ = try reader.readAll(code[offset..offset+length]);
+            _ = try reader.readAll(code[offset .. offset + length]);
         }
     }
     return .{
